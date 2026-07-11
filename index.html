@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>Earthy Olive · Prompter</title>
+
+<!-- Home-screen / fullscreen behaviour -->
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Prompter" />
+<meta name="theme-color" content="#0D120F" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@200;300;400&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet" />
+
+<style>
+  :root{
+    --ink:#0D120F; --panel:#151C17; --line:#26312A;
+    --sage:#A9C0A4; --sageDim:#59695C; --spoken:#47554B;
+    --bright:#F1F4EE; --danger:#C98A7A;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;background:var(--ink);color:var(--bright);
+    font-family:'Atkinson Hyperlegible',sans-serif;overscroll-behavior:none;}
+  #app{height:100dvh;display:flex;flex-direction:column;overflow:hidden;}
+  .josefin{font-family:'Josefin Sans',sans-serif;}
+  button{font-family:'Josefin Sans',sans-serif;cursor:pointer;}
+  .hidden{display:none !important;}
+
+  /* ——— edit screen ——— */
+  #edit{flex:1;display:flex;flex-direction:column;padding:
+    max(2rem,env(safe-area-inset-top)) 1.25rem
+    max(1.25rem,env(safe-area-inset-bottom)) 1.25rem;}
+  .eyebrow{font-weight:200;letter-spacing:.35em;font-size:12px;color:var(--sage);text-transform:uppercase;}
+  h1{font-weight:300;font-size:34px;margin:.15rem 0 0;letter-spacing:.04em;font-family:'Josefin Sans',sans-serif;}
+  .sub{color:var(--sageDim);font-size:14px;margin:.4rem 0 1rem;}
+  textarea{flex:1;width:100%;resize:none;outline:none;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;color:var(--bright);
+    padding:16px;font-size:16px;line-height:1.6;min-height:220px;
+    font-family:'Atkinson Hyperlegible',sans-serif;}
+  .primary{width:100%;margin-top:1rem;background:var(--sage);color:var(--ink);
+    border:none;border-radius:12px;padding:16px 0;font-size:15px;
+    letter-spacing:.12em;text-transform:uppercase;}
+  .primary:disabled{background:var(--line);color:var(--sageDim);}
+
+  /* ——— prompt screen ——— */
+  #prompt{height:100%;display:flex;flex-direction:column;overflow:hidden;}
+  #bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+    padding:calc(6px + env(safe-area-inset-top)) 10px 6px;border-bottom:1px solid var(--line);}
+  .chip{background:transparent;color:var(--sage);border:1px solid var(--line);
+    border-radius:8px;padding:6px 10px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;}
+  .chip.on{background:var(--sage);color:var(--ink);border-color:var(--sage);}
+
+  #stage{position:relative;flex:1;overflow:hidden;}
+  #guide{position:absolute;left:0;right:0;top:30%;z-index:2;pointer-events:none;
+    display:flex;align-items:center;}
+  #guide .rule{flex:1;height:1px;background:var(--line);margin-left:8px;}
+  #scroll{height:100%;overflow-y:auto;padding:28vh 24px 60vh;scrollbar-width:none;}
+  #scroll::-webkit-scrollbar{display:none;}
+  #scroll.mirror{transform:scaleX(-1);}
+  #scroll p{font-size:32px;line-height:1.55;font-weight:700;margin:0 0 1.1em;}
+  #scroll .w{color:var(--bright);transition:color .35s ease;}
+  #scroll .w.said{color:var(--spoken);}
+
+  #err{padding:8px 16px;font-size:14px;color:var(--danger);border-top:1px solid var(--line);}
+
+  #controls{padding:12px 16px calc(12px + env(safe-area-inset-bottom));border-top:1px solid var(--line);}
+  #status{display:flex;align-items:center;gap:8px;margin-bottom:8px;
+    font-family:'Josefin Sans',sans-serif;font-size:11px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--sageDim);}
+  #dot{width:7px;height:7px;border-radius:999px;background:var(--sageDim);}
+  #mic{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;
+    background:var(--sage);color:var(--ink);border:1px solid var(--sage);
+    border-radius:12px;padding:14px 0;font-size:15px;letter-spacing:.12em;text-transform:uppercase;}
+  #mic.live{background:transparent;color:var(--sage);}
+  #pulse{width:8px;height:8px;border-radius:999px;background:var(--sage);animation:pulse 1.2s infinite;}
+  .row{display:flex;align-items:center;gap:12px;margin-top:12px;}
+  input[type=range]{flex:1;accent-color:var(--sage);}
+
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none!important;animation:none!important;scroll-behavior:auto!important;}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- EDIT -->
+  <section id="edit">
+    <div class="eyebrow">Earthy Olive</div>
+    <h1>Prompter</h1>
+    <div class="sub">Paste your story. It scrolls as you speak.</div>
+    <textarea id="script" placeholder="Paste your story here…"></textarea>
+    <button id="open" class="primary" disabled>Open prompter</button>
+  </section>
+
+  <!-- PROMPT -->
+  <section id="prompt" class="hidden">
+    <div id="bar">
+      <button class="chip" id="back">← Edit</button>
+      <button class="chip" id="smaller">A−</button>
+      <button class="chip" id="bigger">A+</button>
+      <button class="chip" id="mirror">Mirror</button>
+      <button class="chip" id="lang">EN</button>
+      <button class="chip" id="top">Top</button>
+    </div>
+
+    <div id="stage">
+      <div id="guide">
+        <svg width="18" height="12" viewBox="0 0 18 12" style="margin-left:6px">
+          <path d="M1 11 C 4 3, 12 1, 17 1 C 14 8, 7 11, 1 11 Z" fill="none" stroke="#A9C0A4" stroke-width="1.2"/>
+        </svg>
+        <div class="rule"></div>
+      </div>
+      <div id="scroll"></div>
+    </div>
+
+    <div id="err" class="hidden"></div>
+
+    <div id="controls">
+      <div id="status"><span id="dot"></span><span id="statusText">Microphone not yet enabled</span></div>
+      <button id="mic">Enable mic &amp; start</button>
+      <div class="row">
+        <button class="chip" id="auto">Auto-scroll</button>
+        <input id="speed" class="hidden" type="range" min="10" max="120" value="40" />
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ——— state ———
+  var script="", fontSize=32, mirrored=false, lang="en-US";
+  var listening=false, autoScroll=false, speed=40, pos=0, micPerm="unknown";
+  var cleanWords=[], rec=null, sessionWords=0, listeningFlag=false;
+  var rafId=null, wakeLock=null, lastTs=0;
+
+  // ——— elements ———
+  var $=function(id){return document.getElementById(id);};
+  var editEl=$("edit"), promptEl=$("prompt"), scriptEl=$("script"), openEl=$("open");
+  var scrollEl=$("scroll"), micBtn=$("mic"), errEl=$("err");
+  var dot=$("dot"), statusText=$("statusText"), langBtn=$("lang");
+  var autoBtn=$("auto"), speedEl=$("speed"), mirrorBtn=$("mirror");
+
+  var norm=function(w){return w.toLowerCase().replace(/[^a-z0-9'áéíóúüñ]/gi,"").trim();};
+
+  // ——— build script DOM ———
+  function render(){
+    scrollEl.innerHTML="";
+    cleanWords=[];
+    var paras=script.split(/\n+/).map(function(p){return p.trim();}).filter(Boolean);
+    var idx=0;
+    paras.forEach(function(p){
+      var pEl=document.createElement("p");
+      pEl.style.fontSize=fontSize+"px";
+      p.split(/\s+/).forEach(function(w){
+        var s=document.createElement("span");
+        s.className="w"; s.textContent=w+" "; s.dataset.i=idx;
+        pEl.appendChild(s);
+        cleanWords.push(norm(w));
+        idx++;
+      });
+      scrollEl.appendChild(pEl);
+    });
+    paintSpoken();
+  }
+
+  function paintSpoken(){
+    var spans=scrollEl.querySelectorAll(".w");
+    for(var i=0;i<spans.length;i++){
+      if(i<pos) spans[i].classList.add("said");
+      else spans[i].classList.remove("said");
+    }
+    var target=scrollEl.querySelector('.w[data-i="'+Math.max(0,pos-1)+'"]');
+    if(target){
+      var guide=scrollEl.clientHeight*0.3;
+      scrollEl.scrollTo({top:target.offsetTop-guide,behavior:"smooth"});
+    }
+  }
+
+  // ——— voice matching ———
+  function advance(spoken){
+    var p=pos;
+    for(var k=0;k<spoken.length;k++){
+      var sw=spoken[k];
+      if(!sw) continue;
+      var limit=Math.min(cleanWords.length,p+16);
+      for(var j=p;j<limit;j++){
+        if(cleanWords[j]===sw){ p=j+1; break; }
+      }
+    }
+    if(p!==pos){ pos=p; paintSpoken(); }
+  }
+
+  function onResult(e){
+    var all=[];
+    for(var i=0;i<e.results.length;i++){
+      all=all.concat(e.results[i][0].transcript.trim().split(/\s+/));
+    }
+    var fresh=all.slice(sessionWords).map(norm).filter(Boolean);
+    sessionWords=all.length;
+    if(fresh.length) advance(fresh.slice(-8));
+  }
+
+  function stopMic(){
+    listeningFlag=false; listening=false;
+    micBtn.classList.remove("live");
+    micBtn.textContent = (micPerm==="granted") ? "Start voice scroll" : "Enable mic & start";
+    try{ rec && rec.stop(); }catch(e){}
+    rec=null;
+  }
+
+  function startMic(){
+    hideErr();
+    var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){ showErr("Voice recognition isn't available in this browser. Auto-scroll still works."); return; }
+    try{
+      rec=new SR();
+      rec.continuous=true; rec.interimResults=true; rec.lang=lang;
+      rec.onresult=onResult;
+      rec.onerror=function(ev){
+        if(ev.error==="not-allowed"||ev.error==="service-not-allowed"){
+          stopMic(); micPerm="denied"; paintStatus();
+          showErr("Microphone access is blocked. Allow it in your browser settings, or use auto-scroll below.");
+        }
+      };
+      rec.onend=function(){
+        if(listeningFlag){ sessionWords=0; try{ rec.start(); }catch(e){} }
+      };
+      sessionWords=0; rec.start();
+      listeningFlag=true; listening=true;
+      micBtn.classList.add("live");
+      micBtn.innerHTML='<span id="pulse"></span>Listening — tap to stop';
+    }catch(e){ showErr("Couldn't start the microphone. Auto-scroll still works."); }
+  }
+
+  // ——— explicit permission request ———
+  function requestPermission(){
+    hideErr();
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+      showErr("This browser won't allow mic access here. Auto-scroll below still works.");
+      micPerm="denied"; paintStatus(); return;
+    }
+    navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
+      stream.getTracks().forEach(function(t){t.stop();});
+      micPerm="granted"; paintStatus(); startMic();
+    }).catch(function(err){
+      micPerm="denied"; paintStatus();
+      if(err&&err.name==="NotAllowedError")
+        showErr("Mic access was blocked. Tap the 🔒/ⓘ icon in your address bar → Microphone → Allow, then try again.");
+      else if(err&&err.name==="NotFoundError")
+        showErr("No microphone was found on this device.");
+      else
+        showErr("Couldn't reach the microphone. Auto-scroll below still works.");
+    });
+  }
+
+  function paintStatus(){
+    dot.style.background = micPerm==="granted"?"var(--sage)":micPerm==="denied"?"var(--danger)":"var(--sageDim)";
+    statusText.textContent = micPerm==="granted"?"Microphone enabled":micPerm==="denied"?"Microphone blocked":"Microphone not yet enabled";
+    if(!listening) micBtn.textContent = micPerm==="granted"?"Start voice scroll":"Enable mic & start";
+  }
+
+  function showErr(m){ errEl.textContent=m; errEl.classList.remove("hidden"); }
+  function hideErr(){ errEl.classList.add("hidden"); }
+
+  // ——— auto-scroll fallback ———
+  function loop(ts){
+    if(!autoScroll){ rafId=null; return; }
+    if(!lastTs) lastTs=ts;
+    var dt=(ts-lastTs)/1000; lastTs=ts;
+    scrollEl.scrollTop += speed*dt;
+    rafId=requestAnimationFrame(loop);
+  }
+  function toggleAuto(){
+    autoScroll=!autoScroll;
+    autoBtn.classList.toggle("on",autoScroll);
+    speedEl.classList.toggle("hidden",!autoScroll);
+    if(autoScroll){ lastTs=0; rafId=requestAnimationFrame(loop); }
+    else if(rafId){ cancelAnimationFrame(rafId); rafId=null; }
+  }
+
+  // ——— wake lock ———
+  function requestWake(){
+    if(navigator.wakeLock&&navigator.wakeLock.request){
+      navigator.wakeLock.request("screen").then(function(w){wakeLock=w;}).catch(function(){});
+    }
+  }
+  function releaseWake(){ try{ wakeLock&&wakeLock.release(); }catch(e){} wakeLock=null; }
+  document.addEventListener("visibilitychange",function(){
+    if(document.visibilityState==="visible" && !promptEl.classList.contains("hidden")) requestWake();
+  });
+
+  function resetTop(){ pos=0; paintSpoken(); scrollEl.scrollTo({top:0,behavior:"smooth"}); }
+
+  // ——— check existing permission ———
+  if(navigator.permissions&&navigator.permissions.query){
+    navigator.permissions.query({name:"microphone"}).then(function(s){
+      micPerm=s.state; paintStatus();
+      s.onchange=function(){ micPerm=s.state; paintStatus(); };
+    }).catch(function(){});
+  }
+
+  // ——— wire up ———
+  scriptEl.addEventListener("input",function(){
+    script=scriptEl.value;
+    openEl.disabled=!script.trim();
+  });
+  openEl.addEventListener("click",function(){
+    if(!script.trim()) return;
+    render(); resetTop();
+    editEl.classList.add("hidden"); promptEl.classList.remove("hidden");
+    requestWake();
+  });
+  $("back").addEventListener("click",function(){
+    stopMic(); if(autoScroll) toggleAuto(); releaseWake();
+    promptEl.classList.add("hidden"); editEl.classList.remove("hidden");
+  });
+  $("smaller").addEventListener("click",function(){ fontSize=Math.max(20,fontSize-4); applyFont(); });
+  $("bigger").addEventListener("click",function(){ fontSize=Math.min(56,fontSize+4); applyFont(); });
+  function applyFont(){ scrollEl.querySelectorAll("p").forEach(function(p){p.style.fontSize=fontSize+"px";}); }
+  mirrorBtn.addEventListener("click",function(){
+    mirrored=!mirrored; scrollEl.classList.toggle("mirror",mirrored); mirrorBtn.classList.toggle("on",mirrored);
+  });
+  langBtn.addEventListener("click",function(){
+    lang = lang==="en-US" ? "es-US" : "en-US";
+    langBtn.textContent = lang==="en-US" ? "EN" : "ES";
+    if(listening){ stopMic(); startMic(); }
+  });
+  $("top").addEventListener("click",resetTop);
+  micBtn.addEventListener("click",function(){
+    if(listening) return stopMic();
+    if(micPerm==="granted") return startMic();
+    requestPermission();
+  });
+  autoBtn.addEventListener("click",toggleAuto);
+  speedEl.addEventListener("input",function(){ speed=Number(speedEl.value); });
+
+})();
+</script>
+</body>
+</html>
