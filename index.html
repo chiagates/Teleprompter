@@ -140,7 +140,8 @@
   // ——— state ———
   var script="", fontSize=32, mirrored=false, lang="en-US";
   var listening=false, autoScroll=false, speed=40, pos=0, micPerm="unknown";
-  var cleanWords=[], rec=null, sessionWords=0, listeningFlag=false;
+  var cleanWords=[], rec=null, listeningFlag=false;
+  var committedWords=[], lastAdvanceTs=0;
   var rafId=null, wakeLock=null, lastTs=0;
 
   // ——— elements ———
@@ -187,27 +188,56 @@
   }
 
   // ——— voice matching ———
-  function advance(spoken){
-    var p=pos;
-    for(var k=0;k<spoken.length;k++){
-      var sw=spoken[k];
-      if(!sw) continue;
-      var limit=Math.min(cleanWords.length,p+16);
-      for(var j=p;j<limit;j++){
-        if(cleanWords[j]===sw){ p=j+1; break; }
+  // Tuning knobs:
+  var TAIL=5;        // how many of your most-recent spoken words to match on
+  var LOOK_BACK=2;   // allow re-anchoring slightly behind current spot
+  var LOOK_AHEAD=7;  // never search further than this ahead — stops runaway jumps
+  var MAX_STEP=6;    // cap how far pos can move in a single update
+  var MIN_RUN=2;     // require a 2-word phrase to jump ahead (a lone common word won't)
+
+  // Align the tail of what you've said against the script near your current
+  // position. We reward the longest run of consecutive matching words and
+  // only move forward — so a stray "the" downstream can't drag the scroll.
+  function matchTail(tail){
+    if(!tail.length) return;
+    var start=Math.max(0,pos-LOOK_BACK);
+    var end=Math.min(cleanWords.length, pos+LOOK_AHEAD);
+    var best={score:0,endPos:pos};
+
+    // Find the longest run of consecutive words shared between the spoken
+    // tail and the script window. Tie-break toward the furthest-forward run.
+    for(var j=start;j<end;j++){
+      for(var k=0;k<tail.length;k++){
+        var run=0;
+        while((j+run)<cleanWords.length && (k+run)<tail.length &&
+              cleanWords[j+run]===tail[k+run]){
+          run++;
+        }
+        if(run>best.score || (run===best.score && (j+run)>best.endPos)){
+          best={score:run, endPos:j+run};
+        }
       }
     }
-    if(p!==pos){ pos=p; paintSpoken(); }
+
+    // Move only on a real phrase match (>=MIN_RUN), or the single exact next
+    // word. Cap the step so nothing lurches ahead.
+    if(best.score>=MIN_RUN || (best.score===1 && best.endPos===pos+1)){
+      var target=Math.min(best.endPos, pos+MAX_STEP);
+      if(target>pos){ pos=target; paintSpoken(); lastAdvanceTs=Date.now(); }
+    }
   }
 
   function onResult(e){
-    var all=[];
-    for(var i=0;i<e.results.length;i++){
-      all=all.concat(e.results[i][0].transcript.trim().split(/\s+/));
+    // Only look at results new since last event (resultIndex), and keep
+    // finalized words in a stable accumulator so pausing doesn't re-trigger.
+    var interim=[];
+    for(var i=e.resultIndex;i<e.results.length;i++){
+      var words=e.results[i][0].transcript.trim().split(/\s+/).map(norm).filter(Boolean);
+      if(e.results[i].isFinal){ committedWords=committedWords.concat(words); }
+      else { interim=interim.concat(words); }
     }
-    var fresh=all.slice(sessionWords).map(norm).filter(Boolean);
-    sessionWords=all.length;
-    if(fresh.length) advance(fresh.slice(-8));
+    var recent=committedWords.concat(interim).slice(-TAIL);
+    matchTail(recent);
   }
 
   function stopMic(){
@@ -233,9 +263,9 @@
         }
       };
       rec.onend=function(){
-        if(listeningFlag){ sessionWords=0; try{ rec.start(); }catch(e){} }
+        if(listeningFlag){ try{ rec.start(); }catch(e){} }
       };
-      sessionWords=0; rec.start();
+      committedWords=[]; rec.start();
       listeningFlag=true; listening=true;
       micBtn.classList.add("live");
       micBtn.innerHTML='<span id="pulse"></span>Listening — tap to stop';
@@ -299,7 +329,7 @@
     if(document.visibilityState==="visible" && !promptEl.classList.contains("hidden")) requestWake();
   });
 
-  function resetTop(){ pos=0; paintSpoken(); scrollEl.scrollTo({top:0,behavior:"smooth"}); }
+  function resetTop(){ pos=0; committedWords=[]; paintSpoken(); scrollEl.scrollTo({top:0,behavior:"smooth"}); }
 
   // ——— check existing permission ———
   if(navigator.permissions&&navigator.permissions.query){
