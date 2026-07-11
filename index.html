@@ -141,7 +141,7 @@
   var script="", fontSize=32, mirrored=false, lang="en-US";
   var listening=false, autoScroll=false, speed=40, pos=0, micPerm="unknown";
   var cleanWords=[], rec=null, listeningFlag=false;
-  var committedWords=[], lastAdvanceTs=0;
+  var committedWords=[], lostCount=0, lastTailKey="";
   var rafId=null, wakeLock=null, lastTs=0;
 
   // ——— elements ———
@@ -189,47 +189,58 @@
 
   // ——— voice matching ———
   // Tuning knobs:
-  var TAIL=5;        // how many of your most-recent spoken words to match on
-  var LOOK_BACK=2;   // allow re-anchoring slightly behind current spot
-  var LOOK_AHEAD=7;  // never search further than this ahead — stops runaway jumps
-  var MAX_STEP=6;    // cap how far pos can move in a single update
-  var MIN_RUN=2;     // require a 2-word phrase to jump ahead (a lone common word won't)
+  var TAIL=6;         // how many of your most-recent spoken words to match on
+  var LOOK_BACK=3;    // allow re-anchoring slightly behind current spot
+  var LOOK_AHEAD=6;   // local search never reaches further than this ahead
+  var MAX_STEP=5;     // cap how far pos can move in a single local update
+  var MIN_RUN=2;      // a lone common word won't move the scroll — need a phrase
+  var RESYNC_AFTER=4; // after this many misses in a row, hunt for your place
+  var RESYNC_RUN=3;   // …and only re-anchor on a confident 3-word phrase match
 
-  // Align the tail of what you've said against the script near your current
-  // position. We reward the longest run of consecutive matching words and
-  // only move forward — so a stray "the" downstream can't drag the scroll.
-  function matchTail(tail){
-    if(!tail.length) return;
-    var start=Math.max(0,pos-LOOK_BACK);
-    var end=Math.min(cleanWords.length, pos+LOOK_AHEAD);
-    var best={score:0,endPos:pos};
-
-    // Find the longest run of consecutive words shared between the spoken
-    // tail and the script window. Tie-break toward the furthest-forward run.
+  // Longest consecutive run shared between the spoken tail and script[start,end).
+  // Tie-break toward the run whose start sits CLOSEST to the current position,
+  // so a repeated word further down can't pull the scroll away.
+  function bestRun(tail,start,end){
+    var best={score:0,startPos:pos,endPos:pos};
     for(var j=start;j<end;j++){
       for(var k=0;k<tail.length;k++){
         var run=0;
         while((j+run)<cleanWords.length && (k+run)<tail.length &&
-              cleanWords[j+run]===tail[k+run]){
-          run++;
-        }
-        if(run>best.score || (run===best.score && (j+run)>best.endPos)){
-          best={score:run, endPos:j+run};
-        }
+              cleanWords[j+run]===tail[k+run]){ run++; }
+        if(run===0) continue;
+        var better = run>best.score ||
+          (run===best.score && Math.abs(j-pos) < Math.abs(best.startPos-pos));
+        if(better){ best={score:run, startPos:j, endPos:j+run}; }
       }
     }
+    return best;
+  }
 
-    // Move only on a real phrase match (>=MIN_RUN), or the single exact next
-    // word. Cap the step so nothing lurches ahead.
-    if(best.score>=MIN_RUN || (best.score===1 && best.endPos===pos+1)){
-      var target=Math.min(best.endPos, pos+MAX_STEP);
-      if(target>pos){ pos=target; paintSpoken(); lastAdvanceTs=Date.now(); }
+  function matchTail(tail){
+    if(!tail.length) return;
+
+    // 1) Local match near where we think you are.
+    var b=bestRun(tail, Math.max(0,pos-LOOK_BACK), Math.min(cleanWords.length,pos+LOOK_AHEAD));
+    if(b.score>=MIN_RUN || (b.score===1 && b.startPos===pos)){
+      var target=Math.min(b.endPos, pos+MAX_STEP);
+      if(target>pos){ pos=target; paintSpoken(); }
+      lostCount=0;
+      return;
+    }
+
+    // 2) Lost the thread (e.g. a word got mis-heard). Count misses, and once
+    //    we've clearly drifted, search the WHOLE script for a confident phrase
+    //    and snap back to it — forward or backward.
+    lostCount++;
+    if(lostCount>=RESYNC_AFTER){
+      var g=bestRun(tail, 0, cleanWords.length);
+      if(g.score>=RESYNC_RUN){ pos=g.endPos; paintSpoken(); lostCount=0; }
     }
   }
 
   function onResult(e){
-    // Only look at results new since last event (resultIndex), and keep
-    // finalized words in a stable accumulator so pausing doesn't re-trigger.
+    // Only look at results new since last event (resultIndex); keep finalized
+    // words in a stable accumulator so pausing doesn't re-trigger matching.
     var interim=[];
     for(var i=e.resultIndex;i<e.results.length;i++){
       var words=e.results[i][0].transcript.trim().split(/\s+/).map(norm).filter(Boolean);
@@ -237,6 +248,10 @@
       else { interim=interim.concat(words); }
     }
     var recent=committedWords.concat(interim).slice(-TAIL);
+    // Skip if the tail hasn't actually changed (idle interim re-fires, pauses).
+    var key=recent.join(" ");
+    if(key===lastTailKey) return;
+    lastTailKey=key;
     matchTail(recent);
   }
 
@@ -265,7 +280,7 @@
       rec.onend=function(){
         if(listeningFlag){ try{ rec.start(); }catch(e){} }
       };
-      committedWords=[]; rec.start();
+      committedWords=[]; lostCount=0; lastTailKey=""; rec.start();
       listeningFlag=true; listening=true;
       micBtn.classList.add("live");
       micBtn.innerHTML='<span id="pulse"></span>Listening — tap to stop';
@@ -329,7 +344,7 @@
     if(document.visibilityState==="visible" && !promptEl.classList.contains("hidden")) requestWake();
   });
 
-  function resetTop(){ pos=0; committedWords=[]; paintSpoken(); scrollEl.scrollTo({top:0,behavior:"smooth"}); }
+  function resetTop(){ pos=0; committedWords=[]; lostCount=0; lastTailKey=""; paintSpoken(); scrollEl.scrollTo({top:0,behavior:"smooth"}); }
 
   // ——— check existing permission ———
   if(navigator.permissions&&navigator.permissions.query){
